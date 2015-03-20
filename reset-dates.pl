@@ -9,6 +9,7 @@ use Data::Dumper;
 use Date::Manip;
 use Getopt::Long qw(GetOptions);
 use File::Basename;
+use Cwd;
 
 sub usage
 {
@@ -50,7 +51,7 @@ sub valid_other
 	return 1;
 }
 
-sub main
+sub parse_options
 {
 	Getopt::Long::Configure qw(gnu_getopt);
 
@@ -58,30 +59,101 @@ sub main
 	my $verbose = 0;
 	my $help    = 0;
 
+	my %opts = (
+		error => 1,
+	);
+
 	GetOptions(
 		'other|o=s'  => \$other,
 		'verbose|v!' => \$verbose,
 		'help|h!'    => \$help,
-	) or die usage();
+	) or return \%opts;
 
 	if ($help) {
-		die usage();
+		return \%opts;
 	}
 
 	if (!valid_other (\$other)) {
-		die usage();
+		$opts{'other'} = $other;
+		return \%opts;
 	}
 
-	print Dumper $other;
-	print Dumper $verbose;
-
-	print Dumper \@ARGV;
-
-	foreach my $repo (@ARGV) {
-		printf "Repo: $repo\n";
+	my @repos = @ARGV;
+	if (scalar @repos == 0) {      # Add a default repo
+		push @repos, q{.};
 	}
+
+	%opts = (
+		repos   => \@repos,
+		verbose => $verbose,
+		other   => $other,
+		error   => 0,
+	);
+
+	return \%opts;
+}
+
+sub main
+{
+	my $opts = parse_options();
+	if ($opts->{'error'}) {
+		usage();
+		return 1;
+	}
+
+	# print Dumper ($opts);
+
+	my $homedir = getcwd();
+
+	my @repos = @{$opts->{'repos'}};
+	foreach (keys @repos) {
+		chdir $homedir;
+		my $dir = $repos[$_];
+		if (!-d $dir) {
+			printf "Directory doesn't exist: '$dir'\n";
+			next;
+		}
+
+		chdir $repos[$_];
+		if (!-d '.git') {
+			printf "Not a git repo: '$dir'\n";
+			next;
+		}
+
+		printf "Repo: %s\n", $repos[$_];
+
+		my $other = $opts->{'other'};
+		if ($other eq 'git') {
+			$other = `git log --format="%cD" -n1`;
+			chomp ($other);
+		}
+
+		if ($other ne '') {
+			printf "reset dates to '$other'\n";
+			system ("find . -name .git -prune -o -print0 | xargs --no-run-if-empty --null touch -d '$other'");
+		}
+
+		my $files = `git ls-files -z | xargs -I{} -0 -n1 git log -n1 --format="%cD\t{}" {}`;
+		my @file_list = split /\n/msx, $files;
+
+		my %dirs = ();
+		foreach my $line (@file_list) {
+			my ($date, $file) = split /\t/msx, $line, 2;
+			# printf "'$date' '$file'\n"
+			# print Dumper (fileparse ($file));
+			system ("touch", '-d', $date, $file);
+			my ($f, $d) = fileparse ($file);
+			$dirs{$d} = ();
+		}
+
+		print Dumper (\%dirs);
+		# printf "%d\n", exists $dirs{'e2/'};
+	}
+
+
+	return 0;
 }
 
 
-main();
+exit main();
 
