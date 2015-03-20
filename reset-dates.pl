@@ -10,10 +10,11 @@ use Date::Manip;
 use Getopt::Long qw(GetOptions);
 use File::Basename;
 use Cwd;
+use English qw(-no_match_vars);
 
 sub usage
 {
-	my $self = basename($0);
+	my $self = basename ($PROGRAM_NAME);
 
 	printf "\n";
 	printf "Usage:\n";
@@ -31,13 +32,14 @@ sub usage
 	printf "If --other is not specfied, only git repo files will be touched\n";
 	printf "If you don't specify a repo, it will look in the current directory\n";
 	printf "\n";
+	return;
 }
 
 sub valid_other
 {
 	my ($str) = @_;
 
-	if ((${$str} eq '') || (${$str} eq 'git')) {
+	if ((${$str} eq q{}) || (${$str} eq 'git')) {
 		return 1;
 	}
 
@@ -55,7 +57,7 @@ sub parse_options
 {
 	Getopt::Long::Configure qw(gnu_getopt);
 
-	my $other   = '';
+	my $other   = q{};
 	my $verbose = 0;
 	my $help    = 0;
 
@@ -63,7 +65,7 @@ sub parse_options
 		error => 1,
 	);
 
-	GetOptions(
+	GetOptions (
 		'other|o=s'  => \$other,
 		'verbose|v!' => \$verbose,
 		'help|h!'    => \$help,
@@ -79,7 +81,7 @@ sub parse_options
 	}
 
 	my @repos = @ARGV;
-	if (scalar @repos == 0) {      # Add a default repo
+	if (scalar @repos == 0) {    # Add a default repo
 		push @repos, q{.};
 	}
 
@@ -95,15 +97,15 @@ sub parse_options
 
 sub main
 {
-	my $opts = parse_options();
+	my $opts = parse_options ();
 	if ($opts->{'error'}) {
-		usage();
+		usage ();
 		return 1;
 	}
 
 	# print Dumper ($opts);
 
-	my $homedir = getcwd();
+	my $homedir = getcwd ();
 
 	my @repos = @{$opts->{'repos'}};
 	foreach (keys @repos) {
@@ -125,12 +127,12 @@ sub main
 		my $other = $opts->{'other'};
 		if ($other eq 'git') {
 			$other = `git log --format="%cD" -n1`;
-			chomp ($other);
+			chomp $other;
 		}
 
-		if ($other ne '') {
+		if ($other ne q{}) {
 			printf "reset dates to '$other'\n";
-			system ("find . -name .git -prune -o -print0 | xargs --no-run-if-empty --null touch -d '$other'");
+			system "find . -name .git -prune -o -print0 | xargs --no-run-if-empty --null touch -d '$other'";
 		}
 
 		my $files = `git ls-files -z | xargs -I{} -0 -n1 git log -n1 --format="%cD\t{}" {}`;
@@ -141,7 +143,7 @@ sub main
 			my ($date, $file) = split /\t/msx, $line, 2;
 			# printf "'$date' '$file'\n"
 			# print Dumper (fileparse ($file));
-			system ("touch", '-d', $date, $file);
+			system 'touch', '-d', $date, $file;
 			my ($f, $d) = fileparse ($file);
 			$dirs{$d} = ();
 		}
@@ -149,21 +151,21 @@ sub main
 		# print Dumper (\%dirs);
 		# printf "%d\n", exists $dirs{'e2/'};
 		foreach (sort keys %dirs) {
-			my $dir = $_;
-			my $date = `git log -n1 --format="%cD" $dir`;
-			chomp ($date);
-			system ("touch", '-d', $date, $dir);
+			my $d    = $_;
+			my $date = `git log -n1 --format="%cD" $d`;
+			chomp $date;
+			system 'touch', '-d', $date, $d;
 		}
 
 		$dir = q{.};
 		my $date = `git log -n1 --format="%cD" $dir`;
-		chomp ($date);
-		system ("touch", '-d', $date, $dir);
+		chomp $date;
+		system 'touch', '-d', $date, $dir;
 	}
 
 	return 0;
 }
 
 
-exit main();
+exit main ();
 
