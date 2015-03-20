@@ -1,0 +1,113 @@
+#!/bin/bash
+
+# set -o errexit	# set -e
+set -o nounset	# set -u
+
+SELF="${0##*/}"
+
+function usage()
+{
+	echo ''
+	echo 'Usage:'
+	echo "    $SELF [OPTIONS] {repos}"
+	echo ''
+	echo '    -v,--verbose           list actions taken'
+	echo ''
+	echo '    -g,--other-git-latest  set non-git files to latest git commit date'
+	echo '    -n,--other-now         set non-git files to the time now'
+	echo '    -d,--other-date DATE   set non-git files to this date'
+	echo ''
+	echo 'With no options, only git repo files will be touched'
+	echo 'It only makes sense to use one of the 'other' options at one time'
+	echo ''
+}
+
+function verbose()
+{
+	[ $OPT_VERBOSE = 1 ] || return
+
+	echo -e "$@"
+}
+
+function valid_date()
+{
+	[ $# = 1  ] || return 1
+	[ -z "$1" ] && return 0
+
+	date -d "$1" >& /dev/null
+}
+
+
+OPT_OTHER=''
+OPT_DATE=''
+OPT_VERBOSE=1
+REPOS=()
+
+until [ $# = 0 ]; do
+	case "$1" in
+		-g|--other-git-latest)
+			OPT_OTHER='latest'
+			;;
+		-n|--other-now)
+			OPT_OTHER='now'
+			OPT_DATE=$(date -R)
+			;;
+		-d|--other-date)
+			OPT_OTHER='date'
+			OPT_DATE="$2"
+			shift
+			;;
+		-v|--verbose)
+			OPT_VERBOSE=1
+			;;
+		*)
+			REPOS+=("$1")
+			;;
+	esac
+	shift
+done
+
+[ ${#REPOS[@]} = 0 ] && REPOS+=('.')
+
+# echo "OPT_OTHER    = '$OPT_OTHER'"
+# echo "OPT_DATE     = '$OPT_DATE'"
+# echo "OPT_VERBOSE  = $OPT_VERBOSE"
+# echo "REPOS        = ${REPOS[@]}"
+
+if ! valid_date "$OPT_DATE"; then
+	echo "Invalid date: '$OPT_DATE'"
+	exit 1
+fi
+
+if [ -n "$OPT_DATE" ]; then
+	OPT_DATE=$(date -R -d "$OPT_DATE")
+fi
+
+for i in "${REPOS[@]}"; do
+	if [ ! -d "$i" ]; then
+		echo "Directory '$i' doesn't exist"
+		continue
+	fi
+
+	verbose "Working on repo '$i'"
+	pushd "$i" >& /dev/null
+
+	if [ ! -d .git ]; then
+		echo "Directory '$i' isn't a git repo"
+		continue
+	fi
+
+	if [ "$OPT_OTHER" = "latest" ]; then
+		OPT_DATE=$(git log --format="%cD" -n1)
+	fi
+
+	if [ -n "$OPT_DATE" ]; then
+		verbose "\tSet all dates to '$OPT_DATE'"
+		find . -name .git -prune -o -print0 | xargs --no-run-if-empty --null touch -d "$OPT_DATE"
+	fi
+
+	git ls-files -z | xargs -I{} -0 -n1 git log -n1 --format="touch -d '%cD' '{}' \$(dirname '{}')" -- "{}" | sh
+
+	popd >& /dev/null
+done
+
