@@ -6,7 +6,7 @@ use warnings;
 our $VERSION = 0.1;
 
 use Data::Dumper;
-
+use Date::Manip;
 use Getopt::Long qw(GetOptions);
 use File::Basename;
 
@@ -32,6 +32,24 @@ sub usage
 	printf "\n";
 }
 
+sub valid_other
+{
+	my ($str) = @_;
+
+	if ((${$str} eq '') || (${$str} eq 'git')) {
+		return 1;
+	}
+
+	my $date = ParseDate (${$str});
+	if (!$date) {
+		printf "Invalid date: '$str'\n";
+		return 0;
+	}
+
+	${$str} = $date;
+	return 1;
+}
+
 sub main
 {
 	Getopt::Long::Configure qw(gnu_getopt);
@@ -50,10 +68,18 @@ sub main
 		die usage();
 	}
 
+	if (!valid_other (\$other)) {
+		die usage();
+	}
+
 	print Dumper $other;
 	print Dumper $verbose;
 
 	print Dumper \@ARGV;
+
+	foreach my $repo (@ARGV) {
+		printf "Repo: $repo\n";
+	}
 }
 
 
