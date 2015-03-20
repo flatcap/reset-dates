@@ -11,6 +11,7 @@ use Getopt::Long qw(GetOptions);
 use File::Basename;
 use Cwd;
 use English qw(-no_match_vars);
+use IPC::Open3;
 
 sub usage
 {
@@ -95,6 +96,59 @@ sub parse_options
 	return \%opts;
 }
 
+sub run_command
+{
+	my ($cmd) = @_;
+
+	# printf "run command: %s\n", $cmd;
+	
+	my $in;
+	my $out;
+	my $err;
+
+	my $pid = open3 $in, $out, $err, $cmd;
+	# or die "could not run bc";
+
+	my $answer_out;
+	my $answer_err;
+
+	if (defined $out) {
+		$answer_out = <$out>;
+		chomp $answer_out;
+	}
+
+	if (defined $err) {
+		$answer_err = <$err>;
+		chomp $answer_err;
+	}
+
+	close ($in);
+	waitpid ($pid, 0);
+
+	# my $child_exit_status = $? >> 8;
+	# printf "retval = $child_exit_status\n";
+
+	return $answer_out || $answer_err;
+}
+
+sub get_git_date
+{
+	my ($obj) = @_;
+
+	my $cmd = 'git log --format="%cD" -n1';
+	if (defined $obj) {
+		$cmd .= " '$obj'";
+	}
+
+	return run_command ($cmd);
+}
+
+sub touch_file
+{
+	my ($date, $obj) = @_;
+	return run_command ("touch -d \"$date\", $obj");
+}
+
 sub main
 {
 	my $opts = parse_options ();
@@ -126,16 +180,15 @@ sub main
 
 		my $other = $opts->{'other'};
 		if ($other eq 'git') {
-			$other = `git log --format="%cD" -n1`;
-			chomp $other;
+			$other = get_git_date();
 		}
 
 		if ($other ne q{}) {
 			printf "reset dates to '$other'\n";
-			system "find . -name .git -prune -o -print0 | xargs --no-run-if-empty --null touch -d '$other'";
+			run_command ("find . -name .git -prune -o -print0 | xargs --no-run-if-empty --null touch -d '$other'");
 		}
 
-		my $files = `git ls-files -z | xargs -I{} -0 -n1 git log -n1 --format="%cD\t{}" {}`;
+		my $files = run_command ("git ls-files -z | xargs -I{} -0 -n1 git log -n1 --format=\"%cD\t{}\" {}");
 		my @file_list = split /\n/msx, $files;
 
 		my %dirs = ();
@@ -143,7 +196,7 @@ sub main
 			my ($date, $file) = split /\t/msx, $line, 2;
 			# printf "'$date' '$file'\n"
 			# print Dumper (fileparse ($file));
-			system 'touch', '-d', $date, $file;
+			touch_file ($date, $file);
 			my ($f, $d) = fileparse ($file);
 			$dirs{$d} = ();
 		}
@@ -152,15 +205,13 @@ sub main
 		# printf "%d\n", exists $dirs{'e2/'};
 		foreach (sort keys %dirs) {
 			my $d    = $_;
-			my $date = `git log -n1 --format="%cD" $d`;
-			chomp $date;
-			system 'touch', '-d', $date, $d;
+			my $date = get_git_date ($d);
+			touch_file ($date, $d);
 		}
 
 		$dir = q{.};
-		my $date = `git log -n1 --format="%cD" $dir`;
-		chomp $date;
-		system 'touch', '-d', $date, $dir;
+		my $date = get_git_date ($dir);
+		touch_file ($date, $dir);
 	}
 
 	return 0;
