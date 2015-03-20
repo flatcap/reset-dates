@@ -146,10 +146,20 @@ sub main
 			$dirs{$d} = ();
 		}
 
-		print Dumper (\%dirs);
+		# print Dumper (\%dirs);
 		# printf "%d\n", exists $dirs{'e2/'};
-	}
+		foreach (sort keys %dirs) {
+			my $dir = $_;
+			my $date = `git log -n1 --format="%cD" $dir`;
+			chomp ($date);
+			system ("touch", '-d', $date, $dir);
+		}
 
+		$dir = q{.};
+		my $date = `git log -n1 --format="%cD" $dir`;
+		chomp ($date);
+		system ("touch", '-d', $date, $dir);
+	}
 
 	return 0;
 }
