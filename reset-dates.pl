@@ -18,15 +18,17 @@ sub usage
 	printf "Usage:\n";
 	printf "    $self [OPTIONS] {repos}\n";
 	printf "\n";
-	printf "    -v,--verbose           list actions taken\n";
+	printf "    -o,--other [git|now|DATE]\n";
+	printf "    Set non-git files to:\n";
+	printf "        git  - the date of the last commit\n";
+	printf "        now  - the date/time now\n";
+	printf "        DATE - this specified date\n";
 	printf "\n";
-	printf "    -g,--other-git-latest  set non-git files to latest git commit date\n";
-	printf "    -n,--other-now         set non-git files to the time now\n";
-	printf "    -d,--other-date DATE   set non-git files to this date\n";
+	printf "    -h,--help     show this help\n";
+	printf "    -v,--verbose  list actions taken\n";
 	printf "\n";
-	printf "With no options, only git repo files will be touched\n";
+	printf "If --other is not specfied, only git repo files will be touched\n";
 	printf "If you don't specify a repo, it will look in the current directory\n";
-	printf "It only makes sense to use one of the 'other' options at one time\n";
 	printf "\n";
 }
 
@@ -34,17 +36,24 @@ sub main
 {
 	Getopt::Long::Configure qw(gnu_getopt);
 
-	my $opt_other;
-	my $opt_verbose = 0;
-	# my $repos = ();
+	my $other   = '';
+	my $verbose = 0;
+	my $help    = 0;
 
 	GetOptions(
-		'other|o=s'  => $opt_other,
-		'verbose|v!' => $opt_verbose,
+		'other|o=s'  => \$other,
+		'verbose|v!' => \$verbose,
+		'help|h!'    => \$help,
 	) or die usage();
 
-	print Dumper ($opt_other);
-	print Dumper ($opt_verbose);
+	if ($help) {
+		die usage();
+	}
+
+	print Dumper $other;
+	print Dumper $verbose;
+
+	print Dumper \@ARGV;
 }
 
 
