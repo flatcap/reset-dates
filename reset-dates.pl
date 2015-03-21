@@ -6,12 +6,15 @@ use warnings;
 our $VERSION = 0.1;
 
 use Data::Dumper;
-use Date::Manip;
+use Date::Manip::Date; #XXX
+use DateTime::Format::ISO8601;
 use Getopt::Long qw(GetOptions);
 use File::Basename;
 use Cwd;
 use English qw(-no_match_vars);
 use IPC::Open3;
+use Carp;
+use File::Touch;
 
 sub usage
 {
@@ -108,7 +111,7 @@ sub run_command
 
 	my $pid = open3 $in, $out, $err, $cmd;
 	if (!defined $pid) {
-		die "Could not run command: $cmd";
+		croak "Could not run command: $cmd";
 	}
 
 	my $answer_out;
@@ -141,7 +144,7 @@ sub get_git_date
 {
 	my ($obj) = @_;
 
-	my $cmd = 'git log --format="%cD" -n1';
+	my $cmd = 'git log --format="%ct" -n1';
 	if (defined $obj) {
 		$cmd .= " '$obj'";
 	}
@@ -153,8 +156,75 @@ sub get_git_date
 
 sub touch_file
 {
-	my ($date, $obj) = @_;
-	return run_command ("touch -d \"$date\", $obj");
+	my ($file, $unix) = @_;
+
+	if (!defined $unix) {
+		$unix = time();
+		printf "$unix\n";
+	}
+
+	my $t = File::Touch->new (
+		no_create => 1,
+		atime => $unix,
+		mtime => $unix,
+	);
+
+	return ($t->touch ($file) == 1);
+}
+
+sub git_dir
+{
+	return (-d '.git');
+}
+
+sub add_dir_component
+{
+	my ($list, $dir, $date) = @_;
+
+	if (exists $list->{$dir}) {
+		if ($date > $list->{$dir}) {
+			$list->{$dir} = $date;
+		}
+	} else {
+		$list->{$dir} = $date;
+	}
+}
+
+sub add_git_dir
+{
+	my ($list, $dir, $date) = @_;
+
+	until ($dir eq q{.}) {
+		add_dir_component ($list, $dir, $date);
+		$dir = dirname $dir;
+	}
+
+	add_dir_component ($list, q{.}, $date);
+}
+
+sub get_git_files
+{
+	my $data = run_command ("git ls-files -z | xargs -I{} -0 -n1 git log -n1 --format=\"%ct\t{}\" {}");
+	if (!$data) {
+		return;
+	}
+
+	my @lines = split /\n/msx, $data;
+
+	my %git_files = ();
+
+	foreach (@lines) {
+		my ($date, $dir_file) = split /\t/msx, $_, 2;
+
+		my ($file, $dir) = fileparse ($dir_file);
+		chop $dir;
+
+		add_git_dir (\%git_files, $dir, $date);
+
+		$git_files{$dir_file} = $date;
+	}
+
+	return %git_files;
 }
 
 sub main
@@ -179,7 +249,7 @@ sub main
 		}
 
 		chdir $repos[$_];
-		if (!-d '.git') {
+		if (!git_dir ()) {
 			printf "Not a git repo: '$dir'\n";
 			next;
 		}
@@ -196,7 +266,7 @@ sub main
 			run_command ("find . -name .git -prune -o -print0 | xargs --no-run-if-empty --null touch -d '$other'");
 		}
 
-		my $files = run_command ("git ls-files -z | xargs -I{} -0 -n1 git log -n1 --format=\"%cD\t{}\" {}");
+		my $files = run_command ("git ls-files -z | xargs -I{} -0 -n1 git log -n1 --format=\"%ct\t{}\" {}");
 		my @file_list = split /\n/msx, $files;
 
 		my %dirs = ();
@@ -204,7 +274,7 @@ sub main
 			my ($date, $file) = split /\t/msx, $line, 2;
 			# printf "'$date' '$file'\n"
 			# print Dumper (fileparse ($file));
-			touch_file ($date, $file);
+			touch_file ($file, $date);
 			my ($f, $d) = fileparse ($file);
 			$dirs{$d} = ();
 		}
@@ -214,12 +284,12 @@ sub main
 		foreach (sort keys %dirs) {
 			my $d = $_;
 			my $date = get_git_date ($d);
-			touch_file ($date, $d);
+			touch_file ($d, $date);
 		}
 
 		$dir = q{.};
 		my $date = get_git_date ($dir);
-		touch_file ($date, $dir);
+		touch_file ($dir, $date);
 	}
 
 	return 0;
