@@ -100,30 +100,36 @@ sub run_command
 {
 	my ($cmd) = @_;
 
-	# printf "run command: %s\n", $cmd;
-	
+	printf "%s\n", $cmd;
+
 	my $in;
 	my $out;
 	my $err;
 
 	my $pid = open3 $in, $out, $err, $cmd;
-	# or die "could not run bc";
+	if (!defined $pid) {
+		die "Could not run command: $cmd";
+	}
 
 	my $answer_out;
 	my $answer_err;
 
 	if (defined $out) {
-		$answer_out = <$out>;
-		chomp $answer_out;
+		while (my $line = <$out>) {
+			$answer_out .= $line;
+		}
 	}
 
 	if (defined $err) {
-		$answer_err = <$err>;
-		chomp $answer_err;
+		while (my $line = <$err>) {
+			$answer_err .= $line;
+		}
 	}
 
-	close ($in);
-	waitpid ($pid, 0);
+	if (!close $in) {
+		printf "close failed\n";
+	}
+	waitpid $pid, 0;
 
 	# my $child_exit_status = $? >> 8;
 	# printf "retval = $child_exit_status\n";
@@ -140,7 +146,9 @@ sub get_git_date
 		$cmd .= " '$obj'";
 	}
 
-	return run_command ($cmd);
+	my $date = run_command ($cmd);
+	chomp $date;
+	return $date;
 }
 
 sub touch_file
@@ -180,7 +188,7 @@ sub main
 
 		my $other = $opts->{'other'};
 		if ($other eq 'git') {
-			$other = get_git_date();
+			$other = get_git_date ();
 		}
 
 		if ($other ne q{}) {
@@ -204,7 +212,7 @@ sub main
 		# print Dumper (\%dirs);
 		# printf "%d\n", exists $dirs{'e2/'};
 		foreach (sort keys %dirs) {
-			my $d    = $_;
+			my $d = $_;
 			my $date = get_git_date ($d);
 			touch_file ($date, $d);
 		}
