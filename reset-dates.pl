@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-our $VERSION = 0.1;
+our $VERSION = 0.2;
 
 use Carp;
 use Cwd;
@@ -15,8 +15,8 @@ use File::Find;
 use File::Touch;
 use Getopt::Long qw(GetOptions);
 use IPC::Open3;
+use Readonly;
 use Time::Local;
-
 
 sub usage
 {
@@ -45,24 +45,31 @@ sub valid_other
 {
 	my ($str) = @_;
 
+	Readonly my $_YEAR  => 0;    # Indexes into point array
+	Readonly my $_MONTH => 1;
+	Readonly my $_DAY   => 2;
+	Readonly my $_HOUR  => 3;
+	Readonly my $_MIN   => 4;
+	Readonly my $_SEC   => 5;
+
 	if ((${$str} eq q{}) || (${$str} eq 'git')) {
 		return 1;
 	}
 
-	my $date = new Date::Manip::Date;
-	my $err = $date->parse(${$str});
+	my $date = Date::Manip::Date->new ();
+	my $err = $date->parse (${$str});
 	if ($err) {
 		printf "Invalid date: '${$str}'\n";
 		return 0;
 	}
 
-	${$str} = timelocal(
-		$date->{'data'}->{'date'}[5],
-		$date->{'data'}->{'date'}[4],
-		$date->{'data'}->{'date'}[3],
-		$date->{'data'}->{'date'}[2],
-		$date->{'data'}->{'date'}[1],
-		$date->{'data'}->{'date'}[0]
+	${$str} = timelocal (
+		$date->{'data'}->{'date'}[$_SEC],
+		$date->{'data'}->{'date'}[$_MIN],
+		$date->{'data'}->{'date'}[$_HOUR],
+		$date->{'data'}->{'date'}[$_DAY],
+		$date->{'data'}->{'date'}[$_MONTH],
+		$date->{'data'}->{'date'}[$_YEAR]
 	);
 
 	return 1;
@@ -114,7 +121,9 @@ sub run_command
 {
 	my ($cmd) = @_;
 
-	printf "%s\n", $cmd;
+	Readonly my $_RV_SHIFT => 8;
+
+	# printf "%s\n", $cmd;
 
 	my $in;
 	my $out;
@@ -145,8 +154,9 @@ sub run_command
 	}
 	waitpid $pid, 0;
 
-	# my $child_exit_status = $? >> 8;
-	# printf "retval = $child_exit_status\n";
+	if ($CHILD_ERROR >> $_RV_SHIFT) {    # retval
+		return;
+	}
 
 	return $answer_out || $answer_err;
 }
@@ -170,14 +180,14 @@ sub touch_file
 	my ($file, $unix) = @_;
 
 	if (!defined $unix) {
-		$unix = time();
+		$unix = time;
 		printf "$unix\n";
 	}
 
 	my $t = File::Touch->new (
 		no_create => 1,
-		atime => $unix,
-		mtime => $unix,
+		atime     => $unix,
+		mtime     => $unix,
 	);
 
 	return ($t->touch ($file) == 1);
@@ -188,10 +198,12 @@ sub git_dir
 	my ($dir) = @_;
 
 	if (!-d $dir) {
-		return 0;;
+		return 0;
 	}
 
-	return (-d "$dir/.git");
+	my $res = run_command ("cd $dir; git branch");
+
+	return (defined $res);
 }
 
 sub add_dir_component
@@ -205,18 +217,8 @@ sub add_dir_component
 	} else {
 		$list->{$dir} = $date;
 	}
-}
 
-sub add_git_dir
-{
-	my ($list, $dir, $date) = @_;
-
-	until ($dir eq q{.}) {
-		add_dir_component ($list, $dir, $date);
-		$dir = dirname $dir;
-	}
-
-	add_dir_component ($list, q{.}, $date);
+	return;
 }
 
 sub get_git_files
@@ -236,7 +238,12 @@ sub get_git_files
 		my ($file, $dir) = fileparse ($dir_file);
 		chop $dir;
 
-		add_git_dir (\%git_files, $dir, $date);
+		while ($dir ne q{.}) {
+			add_dir_component (\%git_files, $dir, $date);
+			$dir = dirname $dir;
+		}
+
+		add_dir_component (\%git_files, q{.}, $date);
 
 		$git_files{$dir_file} = $date;
 	}
@@ -244,45 +251,44 @@ sub get_git_files
 	return %git_files;
 }
 
-
 sub is_git_internal
 {
 	my ($obj) = @_;
 
-	if ($obj =~ /\.git$/) {
+	if ($obj =~ /[.]git$/msx) {
 		return 1;
 	}
 
-	if ($obj =~ /\.git\//) {
+	if ($obj =~ /[.]git\//msx) {
 		return 1;
 	}
 
 	return 0;
 }
 
-sub wanted
+sub fix_date
 {
 	my ($git_files, $git_date, $other_date) = @_;
 
 	my $name = $File::Find::name;
-	$name =~ s/^\.\///;
+	$name =~ s/^[.]\///msx;
 
 	if (is_git_internal ($name)) {
 		touch_file ($name, $git_date);
-		printf "GIT:   $git_date $name\n";
+		# printf "GIT:   $git_date $name\n";
 		return;
 	}
 
 	if (exists $git_files->{$name}) {
 		touch_file ($name, $git_files->{$name});
-		printf "REPO:  $git_files->{$name} $name\n";
+		# printf "REPO:  $git_files->{$name} $name\n";
 		return;
 	}
 
 	if ($other_date ne q{}) {
 		touch_file ($name, $other_date);
 	}
-	printf "OTHER: $other_date $name\n";
+	# printf "OTHER: $other_date $name\n";
 	return;
 }
 
@@ -310,16 +316,16 @@ sub main
 		chdir $repos[$_];
 
 		printf "Repo: %s\n", $repos[$_];
-		my %git_files = get_git_files();
+		my %git_files = get_git_files ();
 		# print Dumper \%git_files;
 
-		my $git_date = $git_files{q{.}};
+		my $git_date = $git_files{q{.}} || get_git_date ();
 		my $other_date = $opts->{'other'};
 		if ($other_date eq 'git') {
 			$other_date = $git_date;
 		}
 
-		finddepth (sub { wanted (\%git_files, $git_date, $other_date) }, q{.});
+		finddepth (sub { fix_date (\%git_files, $git_date, $other_date) }, q{.});
 	}
 
 	return 0;

@@ -1,8 +1,5 @@
 recursive option?
-convert to perl?
-reset all git dir dates
-	but not non-git dirs
-	=> git ls-files | sed 's/[^\/]\+$//' | sort -u
 work on bare repos
 	=> latest git date for all
 don't list files for bare repos
+make verbose option do something
