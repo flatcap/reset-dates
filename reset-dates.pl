@@ -5,16 +5,18 @@ use warnings;
 
 our $VERSION = 0.1;
 
-use Data::Dumper;
-use Date::Manip::Date; #XXX
-use DateTime::Format::ISO8601;
-use Getopt::Long qw(GetOptions);
-use File::Basename;
-use Cwd;
-use English qw(-no_match_vars);
-use IPC::Open3;
 use Carp;
+use Cwd;
+use Data::Dumper;
+use Date::Manip::Date;
+use English qw(-no_match_vars);
+use File::Basename;
+use File::Find;
 use File::Touch;
+use Getopt::Long qw(GetOptions);
+use IPC::Open3;
+use Time::Local;
+
 
 sub usage
 {
@@ -47,13 +49,22 @@ sub valid_other
 		return 1;
 	}
 
-	my $date = ParseDate (${$str});
-	if (!$date) {
-		printf "Invalid date: '$str'\n";
+	my $date = new Date::Manip::Date;
+	my $err = $date->parse(${$str});
+	if ($err) {
+		printf "Invalid date: '${$str}'\n";
 		return 0;
 	}
 
-	${$str} = $date;
+	${$str} = timelocal(
+		$date->{'data'}->{'date'}[5],
+		$date->{'data'}->{'date'}[4],
+		$date->{'data'}->{'date'}[3],
+		$date->{'data'}->{'date'}[2],
+		$date->{'data'}->{'date'}[1],
+		$date->{'data'}->{'date'}[0]
+	);
+
 	return 1;
 }
 
@@ -174,7 +185,13 @@ sub touch_file
 
 sub git_dir
 {
-	return (-d '.git');
+	my ($dir) = @_;
+
+	if (!-d $dir) {
+		return 0;;
+	}
+
+	return (-d "$dir/.git");
 }
 
 sub add_dir_component
@@ -227,6 +244,48 @@ sub get_git_files
 	return %git_files;
 }
 
+
+sub is_git_internal
+{
+	my ($obj) = @_;
+
+	if ($obj =~ /\.git$/) {
+		return 1;
+	}
+
+	if ($obj =~ /\.git\//) {
+		return 1;
+	}
+
+	return 0;
+}
+
+sub wanted
+{
+	my ($git_files, $git_date, $other_date) = @_;
+
+	my $name = $File::Find::name;
+	$name =~ s/^\.\///;
+
+	if (is_git_internal ($name)) {
+		touch_file ($name, $git_date);
+		printf "GIT:   $git_date $name\n";
+		return;
+	}
+
+	if (exists $git_files->{$name}) {
+		touch_file ($name, $git_files->{$name});
+		printf "REPO:  $git_files->{$name} $name\n";
+		return;
+	}
+
+	if ($other_date ne q{}) {
+		touch_file ($name, $other_date);
+	}
+	printf "OTHER: $other_date $name\n";
+	return;
+}
+
 sub main
 {
 	my $opts = parse_options ();
@@ -243,53 +302,24 @@ sub main
 	foreach (keys @repos) {
 		chdir $homedir;
 		my $dir = $repos[$_];
-		if (!-d $dir) {
-			printf "Directory doesn't exist: '$dir'\n";
-			next;
-		}
-
-		chdir $repos[$_];
-		if (!git_dir ()) {
+		if (!git_dir ($dir)) {
 			printf "Not a git repo: '$dir'\n";
 			next;
 		}
 
+		chdir $repos[$_];
+
 		printf "Repo: %s\n", $repos[$_];
+		my %git_files = get_git_files();
+		# print Dumper \%git_files;
 
-		my $other = $opts->{'other'};
-		if ($other eq 'git') {
-			$other = get_git_date ();
+		my $git_date = $git_files{q{.}};
+		my $other_date = $opts->{'other'};
+		if ($other_date eq 'git') {
+			$other_date = $git_date;
 		}
 
-		if ($other ne q{}) {
-			printf "reset dates to '$other'\n";
-			run_command ("find . -name .git -prune -o -print0 | xargs --no-run-if-empty --null touch -d '$other'");
-		}
-
-		my $files = run_command ("git ls-files -z | xargs -I{} -0 -n1 git log -n1 --format=\"%ct\t{}\" {}");
-		my @file_list = split /\n/msx, $files;
-
-		my %dirs = ();
-		foreach my $line (@file_list) {
-			my ($date, $file) = split /\t/msx, $line, 2;
-			# printf "'$date' '$file'\n"
-			# print Dumper (fileparse ($file));
-			touch_file ($file, $date);
-			my ($f, $d) = fileparse ($file);
-			$dirs{$d} = ();
-		}
-
-		# print Dumper (\%dirs);
-		# printf "%d\n", exists $dirs{'e2/'};
-		foreach (sort keys %dirs) {
-			my $d = $_;
-			my $date = get_git_date ($d);
-			touch_file ($d, $date);
-		}
-
-		$dir = q{.};
-		my $date = get_git_date ($dir);
-		touch_file ($dir, $date);
+		finddepth (sub { wanted (\%git_files, $git_date, $other_date) }, q{.});
 	}
 
 	return 0;
